@@ -15,28 +15,50 @@ export namespace Media {
     const commaIndex = input.url.indexOf(",")
     if (commaIndex === -1) return
 
+    const urlMime = dataUrlMime(input.url, commaIndex)
     const base64 = input.url.slice(commaIndex + 1)
     if (!base64) return
     if (base64Bytes(base64) > input.maxBytes) return
 
-    const mime = normalizeMime(input.mime)
-    if (mime === "image/x-icon" || mime === "image/vnd.microsoft.icon") {
+    const mimes = [urlMime, input.mime]
+      .flatMap((mime) => (mime ? [normalizeMime(mime)] : []))
+      .filter((mime, index, array) => array.indexOf(mime) === index)
+
+    const icons = new Set(["image/x-icon", "image/vnd.microsoft.icon"])
+    if (mimes.some((mime) => icons.has(mime))) {
       const png = extractPngFromIco(Buffer.from(base64, "base64"))
-      if (!png) return
-      const data = Buffer.from(png).toString("base64")
-      return {
-        mime: "image/png" as ImageMime,
-        url: `data:image/png;base64,${data}`,
+      if (png) {
+        const data = Buffer.from(png).toString("base64")
+        return {
+          mime: "image/png" as ImageMime,
+          url: `data:image/png;base64,${data}`,
+        }
       }
     }
 
-    if (!Images.has(mime)) return
-    if (!validateImage(mime as ImageMime, base64)) return
+    for (const mime of mimes) {
+      if (!Images.has(mime)) continue
+      if (!validateImage(mime as ImageMime, base64)) continue
+      return {
+        mime: mime as ImageMime,
+        url: `data:${mime};base64,${base64}`,
+      }
+    }
+
+    const sniffed = sniffImage(base64)
+    if (!sniffed) return
 
     return {
-      mime: mime as ImageMime,
-      url: `data:${mime};base64,${base64}`,
+      mime: sniffed,
+      url: `data:${sniffed};base64,${base64}`,
     }
+  }
+
+  function dataUrlMime(url: string, commaIndex: number) {
+    const header = url.slice(5, commaIndex)
+    const mime = header.split(";", 1)[0]?.trim() ?? ""
+    if (mime === "") return
+    return mime
   }
 
   function base64Bytes(base64: string) {
@@ -95,6 +117,12 @@ export namespace Media {
     }
 
     return false
+  }
+
+  function sniffImage(base64: string): ImageMime | undefined {
+    for (const mime of ["image/png", "image/jpeg", "image/gif", "image/webp"] as const) {
+      if (validateImage(mime, base64)) return mime
+    }
   }
 
   function u16le(data: Uint8Array, offset: number) {

@@ -455,6 +455,88 @@ describe("session.message-v2.toModelMessage", () => {
     ])
   })
 
+  test("sniffs PNG from image/x-icon data URLs", () => {
+    const userID = "m-user"
+    const assistantID = "m-assistant"
+
+    const input: MessageV2.WithParts[] = [
+      {
+        info: userInfo(userID),
+        parts: [
+          {
+            ...basePart(userID, "u1"),
+            type: "text",
+            text: "run tool",
+          },
+        ] as MessageV2.Part[],
+      },
+      {
+        info: assistantInfo(assistantID, userID),
+        parts: [
+          {
+            ...basePart(assistantID, "a1"),
+            type: "tool",
+            callID: "call-1",
+            tool: "bash",
+            state: {
+              status: "completed",
+              input: { cmd: "ls" },
+              output: "ok",
+              title: "Bash",
+              metadata: {},
+              time: { start: 0, end: 1 },
+              attachments: [
+                {
+                  ...basePart(assistantID, "file-1"),
+                  type: "file",
+                  mime: "image/x-icon",
+                  filename: "favicon.ico",
+                  url: `data:image/x-icon;base64,${PNG_BASE64}`,
+                },
+              ],
+            },
+          },
+        ] as MessageV2.Part[],
+      },
+    ]
+
+    expect(MessageV2.toModelMessages(input, model)).toStrictEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "run tool" }],
+      },
+      {
+        role: "assistant",
+        content: [
+          {
+            type: "tool-call",
+            toolCallId: "call-1",
+            toolName: "bash",
+            input: { cmd: "ls" },
+            providerExecuted: undefined,
+          },
+        ],
+      },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "call-1",
+            toolName: "bash",
+            output: {
+              type: "content",
+              value: [
+                { type: "text", text: "ok" },
+                { type: "media", mediaType: "image/png", data: PNG_BASE64 },
+              ],
+            },
+          },
+        ],
+      },
+    ])
+  })
+
   test("omits invalid image attachments in tool output", () => {
     const userID = "m-user"
     const assistantID = "m-assistant"
