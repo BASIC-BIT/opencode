@@ -441,7 +441,6 @@ export namespace MessageV2 {
     const result: UIMessage[] = []
     const toolNames = new Set<string>()
     const supportedImageMimes = Media.ImageMimes
-    const supportedImages = new Set<string>(supportedImageMimes)
     const MAX_IMAGE_BYTES = 5 * 1024 * 1024
     // Track media from tool results that need to be injected as user messages
     // for providers that don't support media in tool results.
@@ -568,7 +567,7 @@ export namespace MessageV2 {
 
             if (part.mime.startsWith("image/")) {
               const mime = Media.normalizeMime(part.mime)
-              if (!supportedImages.has(mime)) {
+              if (!Media.isSupportedImageMime(mime)) {
                 userMessage.parts.push({
                   type: "text",
                   text: `ERROR: Cannot attach image ${part.filename ? `"${part.filename}"` : ""} (${part.mime}). Supported: ${supportedImageMimes.join(
@@ -721,7 +720,7 @@ export namespace MessageV2 {
 
                 if (attachment.mime.startsWith("image/")) {
                   const mime = Media.normalizeMime(attachment.mime)
-                  if (!supportedImages.has(mime)) {
+                  if (!Media.isSupportedImageMime(mime)) {
                     omitted.push(attachment.mime)
                     return undefined
                   }

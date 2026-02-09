@@ -10,6 +10,10 @@ export namespace Media {
     return base
   }
 
+  export function isSupportedImageMime(mime: string): mime is ImageMime {
+    return Images.has(normalizeMime(mime))
+  }
+
   export function dataUrlImage(input: { mime: string; url: string; maxBytes: number }) {
     if (!input.url.startsWith("data:")) return
     const commaIndex = input.url.indexOf(",")
