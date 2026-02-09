@@ -577,6 +577,14 @@ export namespace MessageV2 {
                 })
                 continue
               }
+
+              userMessage.parts.push({
+                type: "file",
+                url: part.url,
+                mediaType: mime,
+                filename: part.filename,
+              })
+              continue
             }
 
             userMessage.parts.push({
@@ -709,6 +717,15 @@ export namespace MessageV2 {
                     return undefined
                   }
                   return fixed
+                }
+
+                if (attachment.mime.startsWith("image/")) {
+                  const mime = Media.normalizeMime(attachment.mime)
+                  if (!supportedImages.has(mime)) {
+                    omitted.push(attachment.mime)
+                    return undefined
+                  }
+                  return { mime, url: attachment.url }
                 }
                 return attachment
               })
