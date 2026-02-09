@@ -441,17 +441,21 @@ export namespace MessageV2 {
     const result: UIMessage[] = []
     const toolNames = new Set<string>()
     const supportedImageMimes = Media.ImageMimes
-    const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+    const MAX_IMAGE_BYTES = 5 * 1024 * 1024 // 5MB
     const supported = supportedImageMimes.join(", ")
-    const max = "5MB"
+    const max = MAX_IMAGE_BYTES / (1024 * 1024)
 
     function omittedNote(count: number) {
-      return `[OpenCode: omitted ${count} image attachment(s) due to unsupported/invalid/too-large formats. Supported: ${supported}. Max size: ${max}]`
+      return `[OpenCode: omitted ${count} image attachment(s) due to unsupported/invalid/too-large formats. Supported: ${supported}. Max size: ${max}MB]`
     }
 
     function imageAttachError(filename: string | undefined, mime: string) {
       const label = filename ? ` "${filename}"` : ""
       return `ERROR: Cannot attach image${label} (${mime}). Supported: ${supported}.`
+    }
+
+    function attachable(part: Part): part is Extract<Part, { type: "file" }> {
+      return part.type === "file" && part.mime !== "text/plain" && part.mime !== "application/x-directory"
     }
     // Track media from tool results that need to be injected as user messages
     // for providers that don't support media in tool results.
@@ -547,7 +551,7 @@ export namespace MessageV2 {
               text: part.text,
             })
           // text/plain and directory files are converted into text parts, ignore them
-          if (part.type === "file" && part.mime !== "text/plain" && part.mime !== "application/x-directory") {
+          if (attachable(part)) {
             if (part.mime.startsWith("image/") && part.url.startsWith("data:")) {
               const fixed = fixDataUrlImage({ mime: part.mime, url: part.url })
               if (fixed) {
