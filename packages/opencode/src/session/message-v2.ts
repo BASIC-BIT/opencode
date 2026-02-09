@@ -441,17 +441,17 @@ export namespace MessageV2 {
     const result: UIMessage[] = []
     const toolNames = new Set<string>()
     const supportedImageMimes = Media.ImageMimes
-    const SUPPORTED_IMAGE_LABEL = supportedImageMimes.join(", ")
     const MAX_IMAGE_BYTES = 5 * 1024 * 1024
-    const MAX_IMAGE_LABEL = "5MB"
+    const supported = supportedImageMimes.join(", ")
+    const max = "5MB"
 
     function omittedNote(count: number) {
-      return `[OpenCode: omitted ${count} image attachment(s) due to unsupported/invalid/too-large formats. Supported: ${SUPPORTED_IMAGE_LABEL}. Max size: ${MAX_IMAGE_LABEL}]`
+      return `[OpenCode: omitted ${count} image attachment(s) due to unsupported/invalid/too-large formats. Supported: ${supported}. Max size: ${max}]`
     }
 
     function imageAttachError(filename: string | undefined, mime: string) {
       const label = filename ? ` "${filename}"` : ""
-      return `ERROR: Cannot attach image${label} (${mime}). Supported: ${SUPPORTED_IMAGE_LABEL}.`
+      return `ERROR: Cannot attach image${label} (${mime}). Supported: ${supported}.`
     }
     // Track media from tool results that need to be injected as user messages
     // for providers that don't support media in tool results.
