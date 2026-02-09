@@ -10,7 +10,7 @@ export namespace Media {
     return base
   }
 
-  export function isSupportedImageMime(mime: string): mime is ImageMime {
+  export function isSupportedImageMime(mime: string) {
     return Images.has(normalizeMime(mime))
   }
 
