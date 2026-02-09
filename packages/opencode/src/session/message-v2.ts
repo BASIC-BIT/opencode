@@ -441,7 +441,18 @@ export namespace MessageV2 {
     const result: UIMessage[] = []
     const toolNames = new Set<string>()
     const supportedImageMimes = Media.ImageMimes
+    const SUPPORTED_IMAGE_LABEL = supportedImageMimes.join(", ")
     const MAX_IMAGE_BYTES = 5 * 1024 * 1024
+    const MAX_IMAGE_LABEL = "5MB"
+
+    function omittedNote(count: number) {
+      return `[OpenCode: omitted ${count} image attachment(s) due to unsupported/invalid/too-large formats. Supported: ${SUPPORTED_IMAGE_LABEL}. Max size: ${MAX_IMAGE_LABEL}]`
+    }
+
+    function imageAttachError(filename: string | undefined, mime: string) {
+      const label = filename ? ` "${filename}"` : ""
+      return `ERROR: Cannot attach image${label} (${mime}). Supported: ${SUPPORTED_IMAGE_LABEL}.`
+    }
     // Track media from tool results that need to be injected as user messages
     // for providers that don't support media in tool results.
     //
@@ -475,30 +486,22 @@ export namespace MessageV2 {
         }
 
         const omitted: string[] = []
+
+        function sanitizeAttachment(attachment: { mime: string; url: string }) {
+          if (!attachment.mime.startsWith("image/")) return attachment
+
+          const fixed = fixDataUrlImage({ mime: attachment.mime, url: attachment.url })
+          if (fixed) return fixed
+          omitted.push(attachment.mime)
+        }
+
         const attachments = (outputObject.attachments ?? [])
           .filter((attachment) => attachment.url.startsWith("data:") && attachment.url.includes(","))
-          .map((attachment) => {
-            if (!attachment.mime.startsWith("image/")) return attachment
-
-            const fixed = fixDataUrlImage({ mime: attachment.mime, url: attachment.url })
-            if (!fixed) {
-              omitted.push(attachment.mime)
-              return undefined
-            }
-            return fixed
-          })
+          .map(sanitizeAttachment)
           .filter((attachment): attachment is { mime: string; url: string } => attachment !== undefined)
 
         const text =
-          omitted.length > 0
-            ? [
-                outputObject.text,
-                "",
-                `[OpenCode: omitted ${omitted.length} image attachment(s) due to unsupported/invalid/too-large formats. Supported: ${supportedImageMimes.join(
-                  ", ",
-                )}. Max size: 5MB]`,
-              ].join("\n")
-            : outputObject.text
+          omitted.length > 0 ? [outputObject.text, "", omittedNote(omitted.length)].join("\n") : outputObject.text
 
         return {
           type: "content",
@@ -557,9 +560,7 @@ export namespace MessageV2 {
               } else {
                 userMessage.parts.push({
                   type: "text",
-                  text: `ERROR: Cannot attach image ${part.filename ? `"${part.filename}"` : ""} (${part.mime}). Supported: ${supportedImageMimes.join(
-                    ", ",
-                  )}.`,
+                  text: imageAttachError(part.filename, part.mime),
                 })
               }
               continue
@@ -570,9 +571,7 @@ export namespace MessageV2 {
               if (!Media.isSupportedImageMime(mime)) {
                 userMessage.parts.push({
                   type: "text",
-                  text: `ERROR: Cannot attach image ${part.filename ? `"${part.filename}"` : ""} (${part.mime}). Supported: ${supportedImageMimes.join(
-                    ", ",
-                  )}.`,
+                  text: imageAttachError(part.filename, part.mime),
                 })
                 continue
               }
@@ -707,27 +706,29 @@ export namespace MessageV2 {
           // media (images, PDFs) in tool results
           if (media.length > 0) {
             const omitted: string[] = []
-            const fixedMedia = media
-              .map((attachment) => {
-                if (attachment.mime.startsWith("image/") && attachment.url.startsWith("data:")) {
-                  const fixed = fixDataUrlImage({ mime: attachment.mime, url: attachment.url })
-                  if (!fixed) {
-                    omitted.push(attachment.mime)
-                    return undefined
-                  }
-                  return fixed
-                }
 
-                if (attachment.mime.startsWith("image/")) {
-                  const mime = Media.normalizeMime(attachment.mime)
-                  if (!Media.isSupportedImageMime(mime)) {
-                    omitted.push(attachment.mime)
-                    return undefined
-                  }
-                  return { mime, url: attachment.url }
+            function sanitizeMediaAttachment(attachment: { mime: string; url: string }) {
+              if (attachment.mime.startsWith("image/") && attachment.url.startsWith("data:")) {
+                const fixed = fixDataUrlImage({ mime: attachment.mime, url: attachment.url })
+                if (fixed) return fixed
+                omitted.push(attachment.mime)
+                return
+              }
+
+              if (attachment.mime.startsWith("image/")) {
+                const mime = Media.normalizeMime(attachment.mime)
+                if (!Media.isSupportedImageMime(mime)) {
+                  omitted.push(attachment.mime)
+                  return
                 }
-                return attachment
-              })
+                return { mime, url: attachment.url }
+              }
+
+              return attachment
+            }
+
+            const fixedMedia = media
+              .map(sanitizeMediaAttachment)
               .filter((attachment): attachment is { mime: string; url: string } => attachment !== undefined)
 
             if (fixedMedia.length === 0 && omitted.length === 0) continue
@@ -743,9 +744,7 @@ export namespace MessageV2 {
                   ? [
                       {
                         type: "text" as const,
-                        text: `[OpenCode: omitted ${omitted.length} image attachment(s) due to unsupported/invalid/too-large formats. Supported: ${supportedImageMimes.join(
-                          ", ",
-                        )}. Max size: 5MB]`,
+                        text: omittedNote(omitted.length),
                       },
                     ]
                   : []),
