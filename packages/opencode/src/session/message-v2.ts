@@ -439,6 +439,9 @@ export namespace MessageV2 {
   export function toModelMessages(input: WithParts[], model: Provider.Model): ModelMessage[] {
     const result: UIMessage[] = []
     const toolNames = new Set<string>()
+    const supportedImageMimes = ["image/jpeg", "image/png", "image/gif", "image/webp"] as const
+    const supportedImages = new Set<string>(supportedImageMimes)
+    const MAX_IMAGE_BYTES = 5 * 1024 * 1024
     // Track media from tool results that need to be injected as user messages
     // for providers that don't support media in tool results.
     //
@@ -460,6 +463,121 @@ export namespace MessageV2 {
       return false
     })()
 
+    function normalizeMime(mime: string) {
+      const base = mime.toLowerCase().split(";", 1)[0]?.trim() ?? ""
+      if (base === "image/jpg") return "image/jpeg"
+      return base
+    }
+
+    function base64Bytes(base64: string) {
+      const pad = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0
+      return Math.floor((base64.length * 3) / 4) - pad
+    }
+
+    function decodeHead(base64: string, bytes: number) {
+      const chars = Math.ceil(bytes / 3) * 4
+      return Buffer.from(base64.slice(0, chars), "base64")
+    }
+
+    function validateImage(mime: string, base64: string) {
+      if (!base64) return false
+
+      if (mime === "image/png") {
+        const head = decodeHead(base64, 8)
+        return (
+          head.length >= 8 &&
+          head[0] === 0x89 &&
+          head[1] === 0x50 &&
+          head[2] === 0x4e &&
+          head[3] === 0x47 &&
+          head[4] === 0x0d &&
+          head[5] === 0x0a &&
+          head[6] === 0x1a &&
+          head[7] === 0x0a
+        )
+      }
+
+      if (mime === "image/jpeg") {
+        const head = decodeHead(base64, 3)
+        return head.length >= 3 && head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff
+      }
+
+      if (mime === "image/gif") {
+        const head = decodeHead(base64, 6)
+        if (head.length < 6) return false
+        if (head[0] !== 0x47 || head[1] !== 0x49 || head[2] !== 0x46 || head[3] !== 0x38) return false
+        return (head[4] === 0x37 || head[4] === 0x39) && head[5] === 0x61
+      }
+
+      if (mime === "image/webp") {
+        const head = decodeHead(base64, 12)
+        return (
+          head.length >= 12 &&
+          head[0] === 0x52 &&
+          head[1] === 0x49 &&
+          head[2] === 0x46 &&
+          head[3] === 0x46 &&
+          head[8] === 0x57 &&
+          head[9] === 0x45 &&
+          head[10] === 0x42 &&
+          head[11] === 0x50
+        )
+      }
+
+      return false
+    }
+
+    function u16le(data: Uint8Array, offset: number) {
+      return data[offset] | (data[offset + 1] << 8)
+    }
+
+    function u32le(data: Uint8Array, offset: number) {
+      return (data[offset] | (data[offset + 1] << 8) | (data[offset + 2] << 16) | (data[offset + 3] << 24)) >>> 0
+    }
+
+    function extractPngFromIco(data: Uint8Array) {
+      if (data.length < 6) return
+      if (u16le(data, 0) !== 0) return
+      if (u16le(data, 2) !== 1) return
+      const count = u16le(data, 4)
+      if (count === 0) return
+
+      const max = Math.floor((data.length - 6) / 16)
+      if (count > max) return
+
+      let best: Uint8Array | undefined
+      let bestArea = 0
+      for (let i = 0; i < count; i++) {
+        const base = 6 + i * 16
+        const width = data[base + 0] === 0 ? 256 : data[base + 0]
+        const height = data[base + 1] === 0 ? 256 : data[base + 1]
+        const size = u32le(data, base + 8)
+        const offset = u32le(data, base + 12)
+        if (offset + size > data.length) continue
+        const slice = data.subarray(offset, offset + size)
+
+        if (
+          slice.length < 8 ||
+          slice[0] !== 0x89 ||
+          slice[1] !== 0x50 ||
+          slice[2] !== 0x4e ||
+          slice[3] !== 0x47 ||
+          slice[4] !== 0x0d ||
+          slice[5] !== 0x0a ||
+          slice[6] !== 0x1a ||
+          slice[7] !== 0x0a
+        )
+          continue
+
+        const area = width * height
+        if (area <= bestArea) continue
+        best = slice
+        bestArea = area
+      }
+
+      return best
+    }
+
     const toModelOutput = (output: unknown) => {
       if (typeof output === "string") {
         return { type: "text", value: output }
@@ -470,14 +588,37 @@ export namespace MessageV2 {
           text: string
           attachments?: Array<{ mime: string; url: string }>
         }
-        const attachments = (outputObject.attachments ?? []).filter((attachment) => {
-          return attachment.url.startsWith("data:") && attachment.url.includes(",")
-        })
+
+        const omitted: string[] = []
+        const attachments = (outputObject.attachments ?? [])
+          .filter((attachment) => attachment.url.startsWith("data:") && attachment.url.includes(","))
+          .map((attachment) => {
+            if (!attachment.mime.startsWith("image/")) return attachment
+
+            const fixed = fixDataUrlImage({ mime: attachment.mime, url: attachment.url })
+            if (!fixed) {
+              omitted.push(attachment.mime)
+              return undefined
+            }
+            return fixed
+          })
+          .filter((attachment): attachment is { mime: string; url: string } => attachment !== undefined)
+
+        const text =
+          omitted.length > 0
+            ? [
+                outputObject.text,
+                "",
+                `[OpenCode: omitted ${omitted.length} image attachment(s) due to unsupported/invalid/too-large formats. Supported: ${supportedImageMimes.join(
+                  ", ",
+                )}. Max size: 5MB]`,
+              ].join("\n")
+            : outputObject.text
 
         return {
           type: "content",
           value: [
-            { type: "text", text: outputObject.text },
+            { type: "text", text },
             ...attachments.map((attachment) => ({
               type: "media",
               mediaType: attachment.mime,
@@ -491,6 +632,34 @@ export namespace MessageV2 {
       }
 
       return { type: "json", value: output as never }
+    }
+
+    function fixDataUrlImage(input: { mime: string; url: string }) {
+      if (!input.url.startsWith("data:") || !input.url.includes(",")) return
+
+      const commaIndex = input.url.indexOf(",")
+      const base64 = commaIndex === -1 ? "" : input.url.slice(commaIndex + 1)
+      if (!base64) return
+      if (base64Bytes(base64) > MAX_IMAGE_BYTES) return
+
+      const mime = normalizeMime(input.mime)
+      if (mime === "image/x-icon" || mime === "image/vnd.microsoft.icon") {
+        const png = extractPngFromIco(Buffer.from(base64, "base64"))
+        if (!png) return
+        const data = Buffer.from(png).toString("base64")
+        return {
+          mime: "image/png",
+          url: `data:image/png;base64,${data}`,
+        }
+      }
+
+      if (!supportedImages.has(mime)) return
+      if (!validateImage(mime, base64)) return
+
+      return {
+        mime,
+        url: `data:${mime};base64,${base64}`,
+      }
     }
 
     for (const msg of input) {
@@ -510,13 +679,47 @@ export namespace MessageV2 {
               text: part.text,
             })
           // text/plain and directory files are converted into text parts, ignore them
-          if (part.type === "file" && part.mime !== "text/plain" && part.mime !== "application/x-directory")
+          if (part.type === "file" && part.mime !== "text/plain" && part.mime !== "application/x-directory") {
+            if (part.mime.startsWith("image/") && part.url.startsWith("data:")) {
+              const fixed = fixDataUrlImage({ mime: part.mime, url: part.url })
+              if (fixed) {
+                userMessage.parts.push({
+                  type: "file",
+                  url: fixed.url,
+                  mediaType: fixed.mime,
+                  filename: part.filename,
+                })
+              } else {
+                userMessage.parts.push({
+                  type: "text",
+                  text: `ERROR: Cannot attach image ${part.filename ? `"${part.filename}"` : ""} (${part.mime}). Supported: ${supportedImageMimes.join(
+                    ", ",
+                  )}.`,
+                })
+              }
+              continue
+            }
+
+            if (part.mime.startsWith("image/")) {
+              const mime = normalizeMime(part.mime)
+              if (!supportedImages.has(mime)) {
+                userMessage.parts.push({
+                  type: "text",
+                  text: `ERROR: Cannot attach image ${part.filename ? `"${part.filename}"` : ""} (${part.mime}). Supported: ${supportedImageMimes.join(
+                    ", ",
+                  )}.`,
+                })
+                continue
+              }
+            }
+
             userMessage.parts.push({
               type: "file",
               url: part.url,
               mediaType: part.mime,
               filename: part.filename,
             })
+          }
 
           if (part.type === "compaction") {
             userMessage.parts.push({
@@ -630,6 +833,22 @@ export namespace MessageV2 {
           // Inject pending media as a user message for providers that don't support
           // media (images, PDFs) in tool results
           if (media.length > 0) {
+            const omitted: string[] = []
+            const fixedMedia = media
+              .map((attachment) => {
+                if (attachment.mime.startsWith("image/") && attachment.url.startsWith("data:")) {
+                  const fixed = fixDataUrlImage({ mime: attachment.mime, url: attachment.url })
+                  if (!fixed) {
+                    omitted.push(attachment.mime)
+                    return undefined
+                  }
+                  return fixed
+                }
+                return attachment
+              })
+              .filter((attachment): attachment is { mime: string; url: string } => attachment !== undefined)
+
+            if (fixedMedia.length === 0 && omitted.length === 0) continue
             result.push({
               id: Identifier.ascending("message"),
               role: "user",
@@ -638,7 +857,17 @@ export namespace MessageV2 {
                   type: "text" as const,
                   text: "Attached image(s) from tool result:",
                 },
-                ...media.map((attachment) => ({
+                ...(omitted.length > 0
+                  ? [
+                      {
+                        type: "text" as const,
+                        text: `[OpenCode: omitted ${omitted.length} image attachment(s) due to unsupported/invalid/too-large formats. Supported: ${supportedImageMimes.join(
+                          ", ",
+                        )}. Max size: 5MB]`,
+                      },
+                    ]
+                  : []),
+                ...fixedMedia.map((attachment) => ({
                   type: "file" as const,
                   url: attachment.url,
                   mediaType: attachment.mime,
