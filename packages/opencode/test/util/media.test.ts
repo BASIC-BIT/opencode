@@ -19,7 +19,6 @@ describe("util.media", () => {
     const result = Media.dataUrlImage({
       mime: "image/png",
       url: "data:image/png;base64,aGVsbG8=",
-      maxBytes: 5 * 1024 * 1024,
     })
     expect(result).toBeUndefined()
   })
@@ -28,7 +27,6 @@ describe("util.media", () => {
     const result = Media.dataUrlImage({
       mime: "image/png",
       url: `data:image/png;base64,${PNG_BASE64}`,
-      maxBytes: 5 * 1024 * 1024,
     })
     expect(result).toEqual({
       mime: "image/png",
@@ -57,7 +55,6 @@ describe("util.media", () => {
     const result = Media.dataUrlImage({
       mime: "image/x-icon",
       url: `data:image/x-icon;base64,${ico.toString("base64")}`,
-      maxBytes: 5 * 1024 * 1024,
     })
     expect(result).toEqual({
       mime: "image/png",
@@ -69,20 +66,10 @@ describe("util.media", () => {
     const result = Media.dataUrlImage({
       mime: "image/apng",
       url: `data:image/apng;base64,${PNG_BASE64}`,
-      maxBytes: 5 * 1024 * 1024,
     })
     expect(result).toEqual({
       mime: "image/png",
       url: `data:image/png;base64,${PNG_BASE64}`,
     })
-  })
-
-  test("dataUrlImage respects maxBytes", () => {
-    const result = Media.dataUrlImage({
-      mime: "image/png",
-      url: "data:image/png;base64,AAAA",
-      maxBytes: 1,
-    })
-    expect(result).toBeUndefined()
   })
 })

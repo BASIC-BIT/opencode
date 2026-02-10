@@ -14,7 +14,7 @@ export namespace Media {
     return Images.has(normalizeMime(mime))
   }
 
-  export function dataUrlImage(input: { mime: string; url: string; maxBytes: number }) {
+  export function dataUrlImage(input: { mime: string; url: string }) {
     if (!input.url.startsWith("data:")) return
     const commaIndex = input.url.indexOf(",")
     if (commaIndex === -1) return
@@ -22,7 +22,6 @@ export namespace Media {
     const urlMime = dataUrlMime(input.url, commaIndex)
     const base64 = input.url.slice(commaIndex + 1)
     if (!base64) return
-    if (base64Bytes(base64) > input.maxBytes) return
 
     const mimes = [urlMime, input.mime]
       .flatMap((mime) => (mime ? [normalizeMime(mime)] : []))
@@ -30,12 +29,14 @@ export namespace Media {
 
     const icons = new Set(["image/x-icon", "image/vnd.microsoft.icon"])
     if (mimes.some((mime) => icons.has(mime))) {
-      const png = extractPngFromIco(Buffer.from(base64, "base64"))
-      if (png) {
-        const data = Buffer.from(png).toString("base64")
-        return {
-          mime: "image/png" as ImageMime,
-          url: `data:image/png;base64,${data}`,
+      if (looksLikeIco(base64)) {
+        const png = extractPngFromIco(Buffer.from(base64, "base64"))
+        if (png) {
+          const data = Buffer.from(png).toString("base64")
+          return {
+            mime: "image/png" as ImageMime,
+            url: `data:image/png;base64,${data}`,
+          }
         }
       }
     }
@@ -65,14 +66,17 @@ export namespace Media {
     return mime
   }
 
-  function base64Bytes(base64: string) {
-    const pad = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0
-    return Math.max(0, Math.floor((base64.length * 3) / 4) - pad)
-  }
-
   function decodeHead(base64: string, bytes: number) {
     const chars = Math.ceil(bytes / 3) * 4
     return Buffer.from(base64.slice(0, chars), "base64")
+  }
+
+  function looksLikeIco(base64: string) {
+    const head = decodeHead(base64, 6)
+    if (head.length < 6) return false
+    if (head[0] !== 0x00 || head[1] !== 0x00) return false
+    if (head[2] !== 0x01 || head[3] !== 0x00) return false
+    return head[4] !== 0x00 || head[5] !== 0x00
   }
 
   function validateImage(mime: ImageMime, base64: string) {
