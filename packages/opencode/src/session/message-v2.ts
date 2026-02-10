@@ -452,8 +452,22 @@ export namespace MessageV2 {
       return `ERROR: Cannot attach image${label} (${mime}). Supported: ${supported}.`
     }
 
+    function defined<T>(value: T | undefined): value is T {
+      return value !== undefined
+    }
+
+    function isImage(mime: string) {
+      return mime.startsWith("image/")
+    }
+
     function attachable(part: Part): part is Extract<Part, { type: "file" }> {
       return part.type === "file" && part.mime !== "text/plain" && part.mime !== "application/x-directory"
+    }
+
+    function supportedImage(mime: string) {
+      const normalized = Media.normalizeMime(mime)
+      if (!Media.isSupportedImageMime(normalized)) return
+      return normalized
     }
     // Track media from tool results that need to be injected as user messages
     // for providers that don't support media in tool results.
@@ -498,9 +512,9 @@ export namespace MessageV2 {
         }
 
         const attachments = (outputObject.attachments ?? [])
-          .filter((attachment) => attachment.url.startsWith("data:") && attachment.url.includes(","))
+          .filter((attachment) => Media.isDataUrl(attachment.url))
           .map(sanitizeAttachment)
-          .filter((attachment): attachment is { mime: string; url: string } => attachment !== undefined)
+          .filter(defined)
 
         const text =
           omitted.length > 0 ? [outputObject.text, "", omittedNote(omitted.length)].join("\n") : outputObject.text
@@ -549,7 +563,7 @@ export namespace MessageV2 {
             })
           // text/plain and directory files are converted into text parts, ignore them
           if (attachable(part)) {
-            if (part.mime.startsWith("image/") && part.url.startsWith("data:")) {
+            if (isImage(part.mime) && Media.isDataUrl(part.url)) {
               const fixed = fixDataUrlImage({ mime: part.mime, url: part.url })
               if (fixed) {
                 userMessage.parts.push({
@@ -567,9 +581,9 @@ export namespace MessageV2 {
               continue
             }
 
-            if (part.mime.startsWith("image/")) {
-              const mime = Media.normalizeMime(part.mime)
-              if (!Media.isSupportedImageMime(mime)) {
+            if (isImage(part.mime)) {
+              const mime = supportedImage(part.mime)
+              if (!mime) {
                 userMessage.parts.push({
                   type: "text",
                   text: imageAttachError(part.filename, part.mime),
@@ -709,16 +723,16 @@ export namespace MessageV2 {
             const omitted: string[] = []
 
             function sanitizeMediaAttachment(attachment: { mime: string; url: string }) {
-              if (attachment.mime.startsWith("image/") && attachment.url.startsWith("data:")) {
+              if (isImage(attachment.mime) && Media.isDataUrl(attachment.url)) {
                 const fixed = fixDataUrlImage({ mime: attachment.mime, url: attachment.url })
                 if (fixed) return fixed
                 omitted.push(attachment.mime)
                 return
               }
 
-              if (attachment.mime.startsWith("image/")) {
-                const mime = Media.normalizeMime(attachment.mime)
-                if (!Media.isSupportedImageMime(mime)) {
+              if (isImage(attachment.mime)) {
+                const mime = supportedImage(attachment.mime)
+                if (!mime) {
                   omitted.push(attachment.mime)
                   return
                 }
@@ -728,9 +742,7 @@ export namespace MessageV2 {
               return attachment
             }
 
-            const fixedMedia = media
-              .map(sanitizeMediaAttachment)
-              .filter((attachment): attachment is { mime: string; url: string } => attachment !== undefined)
+            const fixedMedia = media.map(sanitizeMediaAttachment).filter(defined)
 
             if (fixedMedia.length === 0 && omitted.length === 0) continue
             result.push({
