@@ -636,7 +636,7 @@ export namespace MessageV2 {
               // For providers that don't support media in tool results, extract media files
               // (images, PDFs) to be sent as a separate user message
               const isMediaAttachment = (a: { mime: string }) =>
-                a.mime.startsWith("image/") || a.mime === "application/pdf"
+                Media.isImageMime(a.mime) || a.mime === "application/pdf"
               const mediaAttachments = attachments.filter(isMediaAttachment)
               const nonMediaAttachments = attachments.filter((a) => !isMediaAttachment(a))
               if (!supportsMediaInToolResults && mediaAttachments.length > 0) {
