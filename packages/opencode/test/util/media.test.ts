@@ -15,6 +15,18 @@ describe("util.media", () => {
     expect(Media.isSupportedImageMime("image/bmp")).toBe(false)
   })
 
+  test("isImageMime", () => {
+    expect(Media.isImageMime("image/png")).toBe(true)
+    expect(Media.isImageMime("IMAGE/JPG")).toBe(true)
+    expect(Media.isImageMime("image/*")).toBe(true)
+    expect(Media.isImageMime("application/pdf")).toBe(false)
+  })
+
+  test("imageMime", () => {
+    expect(Media.imageMime("image/jpg")).toBe("image/jpeg")
+    expect(Media.imageMime("image/bmp")).toBeUndefined()
+  })
+
   test("isDataUrl", () => {
     expect(Media.isDataUrl("data:image/png;base64,AAAA")).toBe(true)
     expect(Media.isDataUrl("https://example.com")).toBe(false)

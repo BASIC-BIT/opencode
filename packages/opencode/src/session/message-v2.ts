@@ -443,31 +443,8 @@ export namespace MessageV2 {
     const supportedImageMimes = Media.ImageMimes
     const supported = supportedImageMimes.join(", ")
 
-    function omittedNote(count: number) {
-      return `[OpenCode: omitted ${count} image attachment(s) due to unsupported/invalid formats. Supported: ${supported}]`
-    }
-
-    function imageAttachError(filename: string | undefined, mime: string) {
-      const label = filename ? ` "${filename}"` : ""
-      return `ERROR: Cannot attach image${label} (${mime}). Supported: ${supported}.`
-    }
-
-    function defined<T>(value: T | undefined): value is T {
-      return value !== undefined
-    }
-
-    function isImage(mime: string) {
-      return mime.startsWith("image/")
-    }
-
     function attachable(part: Part): part is Extract<Part, { type: "file" }> {
       return part.type === "file" && part.mime !== "text/plain" && part.mime !== "application/x-directory"
-    }
-
-    function supportedImage(mime: string) {
-      const normalized = Media.normalizeMime(mime)
-      if (!Media.isSupportedImageMime(normalized)) return
-      return normalized
     }
     // Track media from tool results that need to be injected as user messages
     // for providers that don't support media in tool results.
@@ -503,21 +480,24 @@ export namespace MessageV2 {
 
         const omitted: string[] = []
 
-        function sanitizeAttachment(attachment: { mime: string; url: string }) {
-          if (!attachment.mime.startsWith("image/")) return attachment
-
-          const fixed = fixDataUrlImage({ mime: attachment.mime, url: attachment.url })
-          if (fixed) return fixed
-          omitted.push(attachment.mime)
-        }
-
         const attachments = (outputObject.attachments ?? [])
           .filter((attachment) => Media.isDataUrl(attachment.url))
-          .map(sanitizeAttachment)
-          .filter(defined)
+          .flatMap((attachment) => {
+            if (!Media.isImageMime(attachment.mime)) return [attachment]
+            const fixed = Media.dataUrlImage(attachment)
+            if (fixed) return [fixed]
+            omitted.push(attachment.mime)
+            return []
+          })
 
         const text =
-          omitted.length > 0 ? [outputObject.text, "", omittedNote(omitted.length)].join("\n") : outputObject.text
+          omitted.length > 0
+            ? [
+                outputObject.text,
+                "",
+                `[OpenCode: omitted ${omitted.length} image attachment(s) due to unsupported/invalid formats. Supported: ${supported}]`,
+              ].join("\n")
+            : outputObject.text
 
         return {
           type: "content",
@@ -538,13 +518,6 @@ export namespace MessageV2 {
       return { type: "json", value: output as never }
     }
 
-    function fixDataUrlImage(input: { mime: string; url: string }) {
-      return Media.dataUrlImage({
-        mime: input.mime,
-        url: input.url,
-      })
-    }
-
     for (const msg of input) {
       if (msg.parts.length === 0) continue
 
@@ -563,8 +536,8 @@ export namespace MessageV2 {
             })
           // text/plain and directory files are converted into text parts, ignore them
           if (attachable(part)) {
-            if (isImage(part.mime) && Media.isDataUrl(part.url)) {
-              const fixed = fixDataUrlImage({ mime: part.mime, url: part.url })
+            if (Media.isImageMime(part.mime) && Media.isDataUrl(part.url)) {
+              const fixed = Media.dataUrlImage({ mime: part.mime, url: part.url })
               if (fixed) {
                 userMessage.parts.push({
                   type: "file",
@@ -573,20 +546,22 @@ export namespace MessageV2 {
                   filename: part.filename,
                 })
               } else {
+                const label = part.filename ? ` "${part.filename}"` : ""
                 userMessage.parts.push({
                   type: "text",
-                  text: imageAttachError(part.filename, part.mime),
+                  text: `ERROR: Cannot attach image${label} (${part.mime}). Supported: ${supported}.`,
                 })
               }
               continue
             }
 
-            if (isImage(part.mime)) {
-              const mime = supportedImage(part.mime)
+            if (Media.isImageMime(part.mime)) {
+              const mime = Media.imageMime(part.mime)
               if (!mime) {
+                const label = part.filename ? ` "${part.filename}"` : ""
                 userMessage.parts.push({
                   type: "text",
-                  text: imageAttachError(part.filename, part.mime),
+                  text: `ERROR: Cannot attach image${label} (${part.mime}). Supported: ${supported}.`,
                 })
                 continue
               }
@@ -722,27 +697,25 @@ export namespace MessageV2 {
           if (media.length > 0) {
             const omitted: string[] = []
 
-            function sanitizeMediaAttachment(attachment: { mime: string; url: string }) {
-              if (isImage(attachment.mime) && Media.isDataUrl(attachment.url)) {
-                const fixed = fixDataUrlImage({ mime: attachment.mime, url: attachment.url })
-                if (fixed) return fixed
+            const fixedMedia = media.flatMap((attachment) => {
+              if (Media.isImageMime(attachment.mime) && Media.isDataUrl(attachment.url)) {
+                const fixed = Media.dataUrlImage(attachment)
+                if (fixed) return [fixed]
                 omitted.push(attachment.mime)
-                return
+                return []
               }
 
-              if (isImage(attachment.mime)) {
-                const mime = supportedImage(attachment.mime)
+              if (Media.isImageMime(attachment.mime)) {
+                const mime = Media.imageMime(attachment.mime)
                 if (!mime) {
                   omitted.push(attachment.mime)
-                  return
+                  return []
                 }
-                return { mime, url: attachment.url }
+                return [{ mime, url: attachment.url }]
               }
 
-              return attachment
-            }
-
-            const fixedMedia = media.map(sanitizeMediaAttachment).filter(defined)
+              return [attachment]
+            })
 
             if (fixedMedia.length === 0 && omitted.length === 0) continue
             result.push({
@@ -757,7 +730,7 @@ export namespace MessageV2 {
                   ? [
                       {
                         type: "text" as const,
-                        text: omittedNote(omitted.length),
+                        text: `[OpenCode: omitted ${omitted.length} image attachment(s) due to unsupported/invalid formats. Supported: ${supported}]`,
                       },
                     ]
                   : []),

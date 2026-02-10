@@ -13,14 +13,24 @@ export namespace Media {
     return Images.has(normalizeMime(mime))
   }
 
+  export function isImageMime(mime: string) {
+    return normalizeMime(mime).startsWith("image/")
+  }
+
+  export function imageMime(mime: string) {
+    const normalized = normalizeMime(mime)
+    if (!Images.has(normalized)) return
+    return normalized
+  }
+
   export function isDataUrl(url: string) {
     return url.startsWith("data:") && url.includes(",")
   }
 
   export function dataUrlImage(input: { mime: string; url: string }) {
     if (!isDataUrl(input.url)) return
-    const mime = normalizeMime(input.mime)
-    if (!isSupportedImageMime(mime)) return
+    const mime = imageMime(input.mime)
+    if (!mime) return
 
     const commaIndex = input.url.indexOf(",")
     const base64 = commaIndex === -1 ? "" : input.url.slice(commaIndex + 1)
