@@ -13,6 +13,7 @@ import { iife } from "@/util/iife"
 import { Media } from "@/util/media"
 import { type SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
+import { Flag } from "@/flag/flag"
 
 export namespace MessageV2 {
   export const OutputLengthError = NamedError.create("MessageOutputLengthError", z.object({}))
@@ -441,12 +442,13 @@ export namespace MessageV2 {
     const result: UIMessage[] = []
     const toolNames = new Set<string>()
     const supportedImageMimes = Media.ImageMimes
-    const MAX_IMAGE_BYTES = 5 * 1024 * 1024 // 5MB
+    const MAX_IMAGE_BYTES = Flag.OPENCODE_EXPERIMENTAL_IMAGE_MAX_BYTES ?? 5 * 1024 * 1024 // 5MB default
     const supported = supportedImageMimes.join(", ")
-    const max = MAX_IMAGE_BYTES / (1024 * 1024)
+    const max =
+      MAX_IMAGE_BYTES % (1024 * 1024) === 0 ? `${MAX_IMAGE_BYTES / (1024 * 1024)}MB` : `${MAX_IMAGE_BYTES} bytes`
 
     function omittedNote(count: number) {
-      return `[OpenCode: omitted ${count} image attachment(s) due to unsupported/invalid/too-large formats. Supported: ${supported}. Max size: ${max}MB]`
+      return `[OpenCode: omitted ${count} image attachment(s) due to unsupported/invalid/too-large formats. Supported: ${supported}. Max size: ${max}]`
     }
 
     function imageAttachError(filename: string | undefined, mime: string) {
