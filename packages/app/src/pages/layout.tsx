@@ -11,7 +11,7 @@ import {
   untrack,
   type JSX,
 } from "solid-js"
-import { A, useNavigate, useParams } from "@solidjs/router"
+import { A, useLocation, useNavigate, useParams } from "@solidjs/router"
 import { useLayout, LocalProject } from "@/context/layout"
 import { useGlobalSync } from "@/context/global-sync"
 import { Persist, persisted } from "@/utils/persist"
@@ -60,6 +60,7 @@ import {
   displayName,
   errorMessage,
   getDraggableId,
+  isRootVisibleSession,
   sortedRootSessions,
   syncWorkspaceOrder,
   workspaceKey,
@@ -104,6 +105,7 @@ export default function Layout(props: ParentProps) {
   const server = useServer()
   const notification = useNotification()
   const permission = usePermission()
+  const location = useLocation()
   const navigate = useNavigate()
   const providers = useProviders()
   const dialog = useDialog()
@@ -120,6 +122,32 @@ export default function Layout(props: ParentProps) {
   }
   const colorSchemeLabel = (scheme: ColorScheme) => language.t(colorSchemeKey[scheme])
   const currentDir = createMemo(() => decode64(params.dir) ?? "")
+
+  const inboxCount = createMemo(() => {
+    return layout.projects.list().flatMap((project) => {
+      const [data] = globalSync.child(project.worktree, { bootstrap: false })
+      const children = childMapByParent(data.session)
+      return data.session.filter((session) => {
+        if (!isRootVisibleSession(session, project.worktree)) return false
+
+        if (notification.session.unseenCount(session.id) > 0) return true
+
+        const permissions = data.permission?.[session.id] ?? []
+        if (permissions.length > 0) return true
+        for (const id of children.get(session.id) ?? []) {
+          if ((data.permission?.[id] ?? []).length > 0) return true
+        }
+
+        const questions = data.question?.[session.id] ?? []
+        if (questions.length > 0) return true
+        for (const id of children.get(session.id) ?? []) {
+          if ((data.question?.[id] ?? []).length > 0) return true
+        }
+
+        return false
+      })
+    }).length
+  })
 
   const [state, setState] = createStore({
     autoselect: !initialDirectory,
@@ -196,6 +224,7 @@ export default function Layout(props: ParentProps) {
   )
 
   const autoselecting = createMemo(() => {
+    if (location.pathname !== "/") return false
     if (params.dir) return false
     if (!state.autoselect) return false
     if (!pageReady()) return true
@@ -486,6 +515,7 @@ export default function Layout(props: ParentProps) {
         if (!value.ready) return
         if (!value.layoutReady) return
         if (!state.autoselect) return
+        if (location.pathname !== "/") return
         if (value.dir) return
 
         const last = server.projects.last()
@@ -1103,6 +1133,15 @@ export default function Layout(props: ParentProps) {
       setState("hoverProject", undefined)
     }
     navigate(`/${base64Encode(session.directory)}/session/${session.id}`)
+    layout.mobileSidebar.hide()
+  }
+
+  function openInbox() {
+    if (!layout.sidebar.opened()) {
+      setState("hoverSession", undefined)
+      setState("hoverProject", undefined)
+    }
+    navigate("/inbox")
     layout.mobileSidebar.hide()
   }
 
@@ -1907,6 +1946,10 @@ export default function Layout(props: ParentProps) {
             <SidebarContent
               opened={() => layout.sidebar.opened()}
               aimMove={aim.move}
+              inboxLabel={() => language.t("sidebar.inbox")}
+              inboxActive={() => location.pathname.startsWith("/inbox")}
+              inboxNotify={() => inboxCount() > 0}
+              onOpenInbox={openInbox}
               projects={() => layout.projects.list()}
               renderProject={(project) => <SortableProject ctx={projectSidebarCtx} project={project} />}
               handleDragStart={handleDragStart}
@@ -1970,6 +2013,10 @@ export default function Layout(props: ParentProps) {
               mobile
               opened={() => layout.sidebar.opened()}
               aimMove={aim.move}
+              inboxLabel={() => language.t("sidebar.inbox")}
+              inboxActive={() => location.pathname.startsWith("/inbox")}
+              inboxNotify={() => inboxCount() > 0}
+              onOpenInbox={openInbox}
               projects={() => layout.projects.list()}
               renderProject={(project) => <SortableProject ctx={projectSidebarCtx} project={project} mobile />}
               handleDragStart={handleDragStart}

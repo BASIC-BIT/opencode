@@ -481,6 +481,11 @@ export const dict = {
   "home.empty.title": "No recent projects",
   "home.empty.description": "Get started by opening a local project",
 
+  "inbox.title": "Inbox",
+  "inbox.clearUnreads": "Clear unreads",
+  "inbox.empty.title": "Nothing needs your attention",
+  "inbox.empty.description": "Unreads and requests will show up here.",
+
   "session.tab.session": "Session",
   "session.tab.review": "Review",
   "session.tab.context": "Context",
@@ -567,6 +572,7 @@ export const dict = {
 
   "sidebar.menu.toggle": "Toggle menu",
   "sidebar.nav.projectsAndSessions": "Projects and sessions",
+  "sidebar.inbox": "Inbox",
   "sidebar.settings": "Settings",
   "sidebar.help": "Help",
   "sidebar.workspaces.enable": "Enable workspaces",

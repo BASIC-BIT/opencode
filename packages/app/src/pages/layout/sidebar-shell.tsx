@@ -17,6 +17,10 @@ export const SidebarContent = (props: {
   mobile?: boolean
   opened: Accessor<boolean>
   aimMove: (event: MouseEvent) => void
+  inboxLabel: Accessor<string>
+  inboxActive: Accessor<boolean>
+  inboxNotify: Accessor<boolean>
+  onOpenInbox: () => void
   projects: Accessor<LocalProject[]>
   renderProject: (project: LocalProject) => JSX.Element
   handleDragStart: (event: unknown) => void
@@ -41,6 +45,26 @@ export const SidebarContent = (props: {
         class="w-16 shrink-0 bg-background-base flex flex-col items-center overflow-hidden"
         onMouseMove={props.aimMove}
       >
+        <div class="shrink-0 w-full pt-2 pb-2 flex flex-col items-center gap-2">
+          <Tooltip placement={props.mobile ? "bottom" : "right"} value={props.inboxLabel()}>
+            <div class="relative">
+              <IconButton
+                icon="inbox"
+                variant="ghost"
+                size="large"
+                onClick={props.onOpenInbox}
+                aria-label={props.inboxLabel()}
+                classList={{
+                  "bg-surface-base-active border-2 border-icon-strong-base": props.inboxActive(),
+                }}
+              />
+              <Show when={props.inboxNotify()}>
+                <div class="absolute top-px right-px size-1.5 rounded-full bg-text-interactive-base" />
+              </Show>
+            </div>
+          </Tooltip>
+          <div class="w-8 h-px bg-border-weak-base" />
+        </div>
         <div class="flex-1 min-h-0 w-full">
           <DragDropProvider
             onDragStart={props.handleDragStart}

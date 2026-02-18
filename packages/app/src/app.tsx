@@ -33,6 +33,7 @@ import { ErrorPage } from "./pages/error"
 import { Suspense, JSX } from "solid-js"
 
 const Home = lazy(() => import("@/pages/home"))
+const Inbox = lazy(() => import("@/pages/inbox"))
 const Session = lazy(() => import("@/pages/session"))
 const Loading = () => <div class="size-full" />
 
@@ -137,6 +138,14 @@ export function AppInterface(props: { defaultUrl?: string; children?: JSX.Elemen
                 component={() => (
                   <Suspense fallback={<Loading />}>
                     <Home />
+                  </Suspense>
+                )}
+              />
+              <Route
+                path="/inbox"
+                component={() => (
+                  <Suspense fallback={<Loading />}>
+                    <Inbox />
                   </Suspense>
                 )}
               />
