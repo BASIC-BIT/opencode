@@ -10,6 +10,7 @@ import { Storage } from "@/storage/storage"
 import { ProviderTransform } from "@/provider/transform"
 import { STATUS_CODES } from "http"
 import { iife } from "@/util/iife"
+import { Media } from "@/util/media"
 import { type SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
 
@@ -439,6 +440,12 @@ export namespace MessageV2 {
   export function toModelMessages(input: WithParts[], model: Provider.Model): ModelMessage[] {
     const result: UIMessage[] = []
     const toolNames = new Set<string>()
+    const supportedImageMimes = Media.ImageMimes
+    const supported = supportedImageMimes.join(", ")
+
+    function attachable(part: Part): part is Extract<Part, { type: "file" }> {
+      return part.type === "file" && part.mime !== "text/plain" && part.mime !== "application/x-directory"
+    }
     // Track media from tool results that need to be injected as user messages
     // for providers that don't support media in tool results.
     //
@@ -470,14 +477,32 @@ export namespace MessageV2 {
           text: string
           attachments?: Array<{ mime: string; url: string }>
         }
-        const attachments = (outputObject.attachments ?? []).filter((attachment) => {
-          return attachment.url.startsWith("data:") && attachment.url.includes(",")
-        })
+
+        const omitted: string[] = []
+
+        const attachments = (outputObject.attachments ?? [])
+          .filter((attachment) => Media.isDataUrl(attachment.url))
+          .flatMap((attachment) => {
+            if (!Media.isImageMime(attachment.mime)) return [attachment]
+            const fixed = Media.dataUrlImage(attachment)
+            if (fixed) return [fixed]
+            omitted.push(attachment.mime)
+            return []
+          })
+
+        const text =
+          omitted.length > 0
+            ? [
+                outputObject.text,
+                "",
+                `[OpenCode: omitted ${omitted.length} image attachment(s) due to unsupported/invalid formats. Supported: ${supported}]`,
+              ].join("\n")
+            : outputObject.text
 
         return {
           type: "content",
           value: [
-            { type: "text", text: outputObject.text },
+            { type: "text", text },
             ...attachments.map((attachment) => ({
               type: "media",
               mediaType: attachment.mime,
@@ -510,13 +535,53 @@ export namespace MessageV2 {
               text: part.text,
             })
           // text/plain and directory files are converted into text parts, ignore them
-          if (part.type === "file" && part.mime !== "text/plain" && part.mime !== "application/x-directory")
+          if (attachable(part)) {
+            if (Media.isImageMime(part.mime) && Media.isDataUrl(part.url)) {
+              const fixed = Media.dataUrlImage({ mime: part.mime, url: part.url })
+              if (fixed) {
+                userMessage.parts.push({
+                  type: "file",
+                  url: fixed.url,
+                  mediaType: fixed.mime,
+                  filename: part.filename,
+                })
+              } else {
+                const label = part.filename ? ` "${part.filename}"` : ""
+                userMessage.parts.push({
+                  type: "text",
+                  text: `ERROR: Cannot attach image${label} (${part.mime}). Supported: ${supported}.`,
+                })
+              }
+              continue
+            }
+
+            if (Media.isImageMime(part.mime)) {
+              const mime = Media.imageMime(part.mime)
+              if (!mime) {
+                const label = part.filename ? ` "${part.filename}"` : ""
+                userMessage.parts.push({
+                  type: "text",
+                  text: `ERROR: Cannot attach image${label} (${part.mime}). Supported: ${supported}.`,
+                })
+                continue
+              }
+
+              userMessage.parts.push({
+                type: "file",
+                url: part.url,
+                mediaType: mime,
+                filename: part.filename,
+              })
+              continue
+            }
+
             userMessage.parts.push({
               type: "file",
               url: part.url,
               mediaType: part.mime,
               filename: part.filename,
             })
+          }
 
           if (part.type === "compaction") {
             userMessage.parts.push({
@@ -571,7 +636,7 @@ export namespace MessageV2 {
               // For providers that don't support media in tool results, extract media files
               // (images, PDFs) to be sent as a separate user message
               const isMediaAttachment = (a: { mime: string }) =>
-                a.mime.startsWith("image/") || a.mime === "application/pdf"
+                Media.isImageMime(a.mime) || a.mime === "application/pdf"
               const mediaAttachments = attachments.filter(isMediaAttachment)
               const nonMediaAttachments = attachments.filter((a) => !isMediaAttachment(a))
               if (!supportsMediaInToolResults && mediaAttachments.length > 0) {
@@ -630,6 +695,29 @@ export namespace MessageV2 {
           // Inject pending media as a user message for providers that don't support
           // media (images, PDFs) in tool results
           if (media.length > 0) {
+            const omitted: string[] = []
+
+            const fixedMedia = media.flatMap((attachment) => {
+              if (Media.isImageMime(attachment.mime) && Media.isDataUrl(attachment.url)) {
+                const fixed = Media.dataUrlImage(attachment)
+                if (fixed) return [fixed]
+                omitted.push(attachment.mime)
+                return []
+              }
+
+              if (Media.isImageMime(attachment.mime)) {
+                const mime = Media.imageMime(attachment.mime)
+                if (!mime) {
+                  omitted.push(attachment.mime)
+                  return []
+                }
+                return [{ mime, url: attachment.url }]
+              }
+
+              return [attachment]
+            })
+
+            if (fixedMedia.length === 0 && omitted.length === 0) continue
             result.push({
               id: Identifier.ascending("message"),
               role: "user",
@@ -638,7 +726,15 @@ export namespace MessageV2 {
                   type: "text" as const,
                   text: "Attached image(s) from tool result:",
                 },
-                ...media.map((attachment) => ({
+                ...(omitted.length > 0
+                  ? [
+                      {
+                        type: "text" as const,
+                        text: `[OpenCode: omitted ${omitted.length} image attachment(s) due to unsupported/invalid formats. Supported: ${supported}]`,
+                      },
+                    ]
+                  : []),
+                ...fixedMedia.map((attachment) => ({
                   type: "file" as const,
                   url: attachment.url,
                   mediaType: attachment.mime,
