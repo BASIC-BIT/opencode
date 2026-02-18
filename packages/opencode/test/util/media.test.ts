@@ -12,6 +12,8 @@ describe("util.media", () => {
 
   test("isSupportedImageMime", () => {
     expect(Media.isSupportedImageMime("image/jpg")).toBe(true)
+    expect(Media.isSupportedImageMime("image/gif")).toBe(false)
+    expect(Media.isSupportedImageMime("image/webp")).toBe(false)
     expect(Media.isSupportedImageMime("image/bmp")).toBe(false)
   })
 

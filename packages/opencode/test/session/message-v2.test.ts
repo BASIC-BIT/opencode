@@ -429,7 +429,7 @@ describe("session.message-v2.toModelMessage", () => {
               value: [
                 {
                   type: "text",
-                  text: "ok\n\n[OpenCode: omitted 1 image attachment(s) due to unsupported/invalid formats. Supported: image/jpeg, image/png, image/gif, image/webp]",
+                  text: "ok\n\n[OpenCode: omitted 1 image attachment(s) due to unsupported/invalid formats. Supported: image/jpeg, image/png]",
                 },
               ],
             },

@@ -1,5 +1,5 @@
 export namespace Media {
-  export const ImageMimes = ["image/jpeg", "image/png", "image/gif", "image/webp"] as const
+  export const ImageMimes = ["image/jpeg", "image/png"] as const
   const Images = new Set<string>(ImageMimes)
 
   export function normalizeMime(mime: string) {
